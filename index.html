@@ -3,37 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>ロケット AR体験（透過・操作完全版）</title>
+    <title>和傘・ロケット AR体験（安定動作版）</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <script src="https://gftruj.github.io/aframe-gesture-detector-component/dist/aframe-gesture-detector-component.min.js"></script>
 
     <style>
-        /* 💡 画面を完全に透過させ、裏側のカメラ映像を見せるための必須設定 */
-        html, body { margin: 0; overflow: hidden; width: 100%; height: 100%; background-color: transparent; }
-        a-scene { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
         
         #scanning-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.7); color: white; display: flex;
+            background: rgba(0,0,0,0.8); color: white; display: flex;
             flex-direction: column; align-items: center; justify-content: center;
-            font-family: sans-serif; z-index: 999; pointer-events: none;
-            padding: 20px; text-align: center;
+            z-index: 999; pointer-events: none; text-align: center;
         }
         .hidden { display: none !important; }
+        
         #instruction-ui {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.6); color: white; padding: 10px 20px;
-            border-radius: 20px; font-family: sans-serif; font-size: 14px;
-            z-index: 900; pointer-events: none; text-align: center; width: 80%;
+            background: rgba(0,0,0,0.6); color: white; padding: 12px 20px;
+            border-radius: 25px; font-size: 14px; z-index: 900; 
+            pointer-events: none; text-align: center; width: 80%; line-height: 1.5;
         }
     </style>
 </head>
 <body>
 
     <div id="scanning-overlay">
-        <p>AR空間を初期化中...</p>
-        <p style="font-size: 12px; margin-top: 10px;">起動後、画面を2秒間長押しするとオブジェクトが現れます</p>
+        <p>ARシステム起動中...</p>
+        <p style="font-size: 12px; margin-top: 10px;">カメラの許可ポップアップが出たら「許可」を押してください</p>
     </div>
 
     <div id="instruction-ui" class="hidden">
@@ -41,23 +40,23 @@
         1本指フリック：回転 / 2本指ピンチ：拡大縮小
     </div>
 
-    <a-scene embedded
+    <a-scene embedded 
+             arjs="sourceType: webcam; debugUIEnabled: false;"
              gesture-detector
-             color-space="sRGB" 
-             renderer="colorManagement: true, physicallyCorrectLights: true, alpha: true">
+             renderer="colorManagement: true; physicallyCorrectLights: true;">
         
         <a-assets>
-            <a-asset-item id="wagasaModel" src="WebAR-Rocket.glb"></a-asset-item>
+            <a-asset-item id="rocketModel" src="WebAR-Rocket.glb"></a-asset-item>
         </a-assets>
 
         <a-camera position="0 1.6 0" look-controls="enabled: false">
             <a-entity cursor="fuse: false; rayOrigin: mouse;" raycaster="objects: .clickable; far: 100;"></a-entity>
         </a-camera>
 
-        <a-entity id="ar-target" position="0 0.5 -3">
+        <a-entity id="ar-target" position="0 0 -2.5">
             
-            <a-gltf-model id="wagasa"
-                          src="#wagasaModel" 
+            <a-gltf-model id="rocket"
+                          src="#rocketModel" 
                           position="0 0 0" 
                           scale="0.5 0.5 0.5" 
                           rotation="0 0 0"
@@ -66,58 +65,56 @@
                           gesture-handler="minScale: 0.05; maxScale: 3.0">
             </a-gltf-model>
             
-            <a-plane id="touch-floor" class="clickable" position="0 0 0" rotation="-90 0 0" width="100" height="100" material="transparent: true; opacity: 0.0"></a-plane>
+            <a-plane id="touch-floor" class="clickable" position="0 -1 0" rotation="-90 0 0" width="100" height="100" material="transparent: true; opacity: 0.0"></a-plane>
 
         </a-entity>
     </scene>
 
     <script>
-        const wagasa = document.getElementById('wagasa');
+        const rocket = document.getElementById('rocket');
         const overlay = document.getElementById('scanning-overlay');
         const instruction = document.getElementById('instruction-ui');
+        const floor = document.getElementById('touch-floor');
         
-        let touchStartTime = 0;
         let touchTimeout = null;
 
+        // ページ読み込み後、AR.jsの初期化時間を考慮して2秒後に案内を表示
         window.addEventListener('load', () => {
             setTimeout(() => {
                 overlay.classList.add('hidden');
                 instruction.classList.remove('hidden');
-            }, 1500);
+            }, 2000);
         });
 
-        // --- 2秒長押しの配置・移動ロジック（床面レイキャスト連動） ---
+        // --- 2秒間長押しでの位置決定・移動ロジック ---
         function handleLongTouch(e) {
             if (e.detail && e.detail.intersection) {
-                // タップした床の「正確な3D座標」を取得
                 const p = e.detail.intersection.point;
-                
-                // 親要素（ar-target）からの相対座標に変換するため、Z軸を調整
-                wagasa.setAttribute('position', `${p.x} 0 ${p.z + 3}`);
-                wagasa.setAttribute('visible', 'true');
+                // タップした座標（床の上）にロケットを移動して表示
+                rocket.setAttribute('position', `${p.x} ${p.y + 1} ${p.z + 2.5}`);
+                rocket.setAttribute('visible', 'true');
             } else {
-                // 万が一床を外してタップしても、正面に安全に出現させるフォールバック
-                wagasa.setAttribute('position', '0 0 0');
-                wagasa.setAttribute('visible', 'true');
+                // 交差が取得できなかった場合のセーフティ
+                rocket.setAttribute('position', '0 0 0');
+                rocket.setAttribute('visible', 'true');
             }
         }
 
         window.addEventListener('touchstart', (e) => {
-            touchStartTime = Date.now();
             touchTimeout = setTimeout(() => {
-                // A-Frameのカーソルイベントから交差情報を引き継ぐ
                 const cursorEl = document.querySelector('[cursor]');
-                const intersection = cursorEl.components.raycaster.getIntersection(document.getElementById('touch-floor'));
-                
-                handleLongTouch({ detail: { intersection: intersection } });
-            }, 2000);
+                if (cursorEl && cursorEl.components.raycaster) {
+                    const intersection = cursorEl.components.raycaster.getIntersection(floor);
+                    handleLongTouch({ detail: { intersection: intersection } });
+                }
+            }, 2000); // 2000ms = 2秒
         });
 
         window.addEventListener('touchend', () => { clearTimeout(touchTimeout); });
         window.addEventListener('touchmove', () => { clearTimeout(touchTimeout); });
 
 
-        // --- ジェスチャーコンポーネント ---
+        // --- ジェスチャー（フリック回転・ピンチ拡大縮小）制御コンポーネント ---
         AFRAME.registerComponent('gesture-handler', {
             schema: {
                 minScale: {type: 'number', default: 0.05},
@@ -131,7 +128,7 @@
                 this.el.sceneEl.addEventListener('oneFingerGesture', this.handleRotation);
             },
             handleScale: function (event) {
-                if (!wagasa.getAttribute('visible')) return;
+                if (!rocket.getAttribute('visible')) return;
                 let scaleFactor = event.detail.spreadChange / event.detail.startSpread;
                 let currentScale = this.el.getAttribute('scale');
                 
@@ -146,12 +143,12 @@
                 this.el.setAttribute('scale', {x: scaleX, y: scaleY, z: scaleZ});
             },
             handleRotation: function (event) {
-                if (!wagasa.getAttribute('visible')) return;
+                if (!rocket.getAttribute('visible')) return;
                 let currentRotation = this.el.getAttribute('rotation');
                 
-                // フリック移動量に応じて回転
-                let rotationX = currentRotation.x - event.detail.positionChange.y * 0.6;
-                let rotationY = currentRotation.y + event.detail.positionChange.x * 0.6;
+                // フリック量に応じた回転調整（0.5 = 回転速度）
+                let rotationX = currentRotation.x - event.detail.positionChange.y * 0.5;
+                let rotationY = currentRotation.y + event.detail.positionChange.x * 0.5;
 
                 this.el.setAttribute('rotation', {x: rotationX, y: rotationY, z: currentRotation.z});
             }
