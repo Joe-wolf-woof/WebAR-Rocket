@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>和傘 AR体験（高機能版）</title>
+    
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+    <script src="https://gftruj.github.io/aframe-gesture-detector-component/dist/aframe-gesture-detector-component.min.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #scanning-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); color: white; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
+            font-family: sans-serif; z-index: 999; pointer-events: none;
+            padding: 20px; text-align: center;
+        }
+        .hidden { display: none !important; }
+        #instruction-ui {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.6); color: white; padding: 10px 20px;
+            border-radius: 20px; font-family: sans-serif; font-size: 14px;
+            z-index: 900; pointer-events: none; text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="scanning-overlay">
+        <p>カメラの準備中...</p>
+        <p style="font-size: 12px; margin-top: 10px;">起動後、画面を2秒間長押しすると和傘が現れます</p>
+    </div>
+
+    <div id="instruction-ui" class="hidden">
+        画面を2秒長押し：和傘を配置/移動<br>
+        1本指フリック：回転 / 2本指ピンチ：拡大縮小
+    </div>
+
+    <a-scene mindar-image="imageTargetSrc: https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/examples/image-tracking/assets/card-example/card.mind;" 
+             color-space="sRGB" 
+             renderer="colorManagement: true, physicallyCorrectLights: true" 
+             vr-mode-ui="enabled: false" 
+             device-orientation-permission-ui="enabled: true"
+             gesture-detector>
+        
+        <a-assets>
+            <a-asset-item id="wagasaModel" src="wagasa.glb"></a-asset-item>
+        </a-assets>
+
+        <a-camera position="0 0 0" look-controls="enabled: false">
+            <a-entity cursor="fuse: false; rayOrigin: mouse;" raycaster="objects: .clickable"></a-entity>
+        </a-camera>
+
+        <a-entity mindar-image-target="targetIndex: 0" id="ar-target">
+            
+            <a-gltf-model id="wagasa"
+                          src="#wagasaModel" 
+                          position="0 0 0" 
+                          scale="0.5 0.5 0.5" 
+                          rotation="0 0 0"
+                          visible="false"
+                          class="clickable"
+                          gesture-handler="minScale: 0.1; maxScale: 3.0">
+            </a-gltf-model>
+            
+            <a-plane id="touch-floor" class="clickable" position="0 0 0" rotation="0 0 0" width="10" height="10" material="transparent: true; opacity: 0.0"></a-plane>
+
+        </a-entity>
+    </scene>
+
+    <script>
+        const wagasa = document.getElementById('wagasa');
+        const scene = document.querySelector('a-scene');
+        const overlay = document.getElementById('scanning-overlay');
+        const instruction = document.getElementById('instruction-ui');
+        
+        let touchStartTime = 0;
+        let touchTimeout = null;
+
+        // カメラ起動時の処理
+        scene.addEventListener('arReady', () => {
+            overlay.classList.add('hidden');
+            instruction.classList.remove('hidden');
+        });
+
+        // --- 2秒間タップ（長押し）の判定ロジック ---
+        
+        function handleLongTouch(e) {
+            // タップされた3D空間上の座標を取得（簡易レイトレーシング）
+            // 最初はターゲットの中心(0,0,0)付近に配置し、2回目以降はタップ位置を大まかに反映
+            let targetX = 0;
+            let targetY = 0;
+            
+            if (e.detail && e.detail.intersection) {
+                targetX = e.detail.intersection.point.x;
+                targetY = e.detail.intersection.point.y;
+            }
+
+            // モデルを表示、または位置を更新
+            wagasa.setAttribute('position', `${targetX} ${targetY} 0`);
+            wagasa.setAttribute('visible', 'true');
+        }
+
+        // 画面がタッチされた瞬間
+        window.addEventListener('touchstart', (e) => {
+            touchStartTime = Date.now();
+            // 2000ミリ秒（2秒）後に実行するタイマーをセット
+            touchTimeout = setTimeout(() => {
+                handleLongTouch(e);
+            }, 2000);
+        });
+
+        // 指が離れた、または動いた（フリックされた）ら2秒タイマーをキャンセル
+        window.addEventListener('touchend', () => { clearTimeout(touchTimeout); });
+        window.addEventListener('touchmove', () => { clearTimeout(touchTimeout); });
+
+
+        // --- 上下左右フリック（回転）＆ピンチ（拡大縮小）の制御 ---
+        
+        AFRAME.registerComponent('gesture-handler', {
+            schema: {
+                minScale: {type: 'number', default: 0.1},
+                maxScale: {type: 'number', default: 3}
+            },
+            init: function () {
+                this.handleScale = this.handleScale.bind(this);
+                this.handleRotation = this.handleRotation.bind(this);
+
+                this.el.sceneEl.addEventListener('twoFingerGesture', this.handleScale);
+                this.el.sceneEl.addEventListener('oneFingerGesture', this.handleRotation);
+            },
+            handleScale: function (event) {
+                if (!wagasa.getAttribute('visible')) return;
+                let scaleFactor = event.detail.spreadChange / event.detail.startSpread;
+                let currentScale = this.el.getAttribute('scale');
+                
+                let scaleX = currentScale.x * (1 + scaleFactor);
+                let scaleY = currentScale.y * (1 + scaleFactor);
+                let scaleZ = currentScale.z * (1 + scaleFactor);
+
+                // 制限値の範囲内でのみ拡大縮小
+                scaleX = Math.min(Math.max(scaleX, this.data.minScale), this.data.maxScale);
+                scaleY = Math.min(Math.max(scaleY, this.data.minScale), this.data.maxScale);
+                scaleZ = Math.min(Math.max(scaleZ, this.data.minScale), this.data.maxScale);
+
+                this.el.setAttribute('scale', {x: scaleX, y: scaleY, z: scaleZ});
+            },
+            handleRotation: function (event) {
+                if (!wagasa.getAttribute('visible')) return;
+                let currentRotation = this.el.getAttribute('rotation');
+                
+                // フリックの移動量に応じて、X軸（上下）とY軸（左右）の回転を計算
+                let rotationX = currentRotation.x - event.detail.positionChange.y * 0.5;
+                let rotationY = currentRotation.y + event.detail.positionChange.x * 0.5;
+
+                this.el.setAttribute('rotation', {x: rotationX, y: rotationY, z: currentRotation.z});
+            }
+        });
+    </script>
+</body>
+</html>
