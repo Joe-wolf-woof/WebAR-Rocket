@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>和傘・ロケット AR体験（安定動作版）</title>
+    <title>和傘・ロケット AR体験（操作確定版）</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
@@ -49,36 +49,28 @@
             <a-asset-item id="rocketModel" src="WebAR-Rocket.glb"></a-asset-item>
         </a-assets>
 
-        <a-camera position="0 1.6 0" look-controls="enabled: false">
-            <a-entity cursor="fuse: false; rayOrigin: mouse;" raycaster="objects: .clickable; far: 100;"></a-entity>
-        </a-camera>
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-        <a-entity id="ar-target" position="0 0 -2.5">
-            
-            <a-gltf-model id="rocket"
-                          src="#rocketModel" 
-                          position="0 0 0" 
-                          scale="0.5 0.5 0.5" 
-                          rotation="0 0 0"
-                          visible="false"
-                          class="clickable"
-                          gesture-handler="minScale: 0.05; maxScale: 3.0">
-            </a-gltf-model>
-            
-            <a-plane id="touch-floor" class="clickable" position="0 -1 0" rotation="-90 0 0" width="100" height="100" material="transparent: true; opacity: 0.0"></a-plane>
+        <a-gltf-model id="rocket"
+                      src="#rocketModel" 
+                      position="0 -0.5 -2" 
+                      scale="0.5 0.5 0.5" 
+                      rotation="0 0 0"
+                      visible="false"
+                      class="clickable"
+                      gesture-handler="minScale: 0.05; maxScale: 3.0">
+        </a-gltf-model>
 
-        </a-entity>
-    </scene>
+    </a-scene>
 
     <script>
         const rocket = document.getElementById('rocket');
         const overlay = document.getElementById('scanning-overlay');
         const instruction = document.getElementById('instruction-ui');
-        const floor = document.getElementById('touch-floor');
         
         let touchTimeout = null;
 
-        // ページ読み込み後、AR.jsの初期化時間を考慮して2秒後に案内を表示
+        // 起動後2秒で案内を表示
         window.addEventListener('load', () => {
             setTimeout(() => {
                 overlay.classList.add('hidden');
@@ -86,73 +78,23 @@
             }, 2000);
         });
 
-        // --- 2秒間長押しでの位置決定・移動ロジック ---
-        function handleLongTouch(e) {
-            if (e.detail && e.detail.intersection) {
-                const p = e.detail.intersection.point;
-                // タップした座標（床の上）にロケットを移動して表示
-                rocket.setAttribute('position', `${p.x} ${p.y + 1} ${p.z + 2.5}`);
-                rocket.setAttribute('visible', 'true');
-            } else {
-                // 交差が取得できなかった場合のセーフティ
-                rocket.setAttribute('position', '0 0 0');
-                rocket.setAttribute('visible', 'true');
-            }
-        }
-
+        // --- 2秒間長押しでの出現・リセットロジック ---
+        // 画面のどこを触っても、最前面のレイヤーが邪魔していても一発で動くようにHTML全体（window）のイベントで処理します
         window.addEventListener('touchstart', (e) => {
+            // 2本指操作（ピンチ）のときは長押し判定を行わない
+            if (e.touches.length > 1) return;
+
             touchTimeout = setTimeout(() => {
-                const cursorEl = document.querySelector('[cursor]');
-                if (cursorEl && cursorEl.components.raycaster) {
-                    const intersection = cursorEl.components.raycaster.getIntersection(floor);
-                    handleLongTouch({ detail: { intersection: intersection } });
-                }
-            }, 2000); // 2000ms = 2秒
+                // すでに表示されている場合は、一度初期位置（正面）に引き戻して角度をリセット（再配置機能）
+                rocket.setAttribute('position', '0 -0.5 -2');
+                rocket.setAttribute('rotation', '0 0 0');
+                rocket.setAttribute('visible', 'true');
+            }, 2000); // 2秒
         });
 
+        // 指が動いたり離れたら長押しをキャンセル
         window.addEventListener('touchend', () => { clearTimeout(touchTimeout); });
         window.addEventListener('touchmove', () => { clearTimeout(touchTimeout); });
-
-
-        // --- ジェスチャー（フリック回転・ピンチ拡大縮小）制御コンポーネント ---
-        AFRAME.registerComponent('gesture-handler', {
-            schema: {
-                minScale: {type: 'number', default: 0.05},
-                maxScale: {type: 'number', default: 3}
-            },
-            init: function () {
-                this.handleScale = this.handleScale.bind(this);
-                this.handleRotation = this.handleRotation.bind(this);
-
-                this.el.sceneEl.addEventListener('twoFingerGesture', this.handleScale);
-                this.el.sceneEl.addEventListener('oneFingerGesture', this.handleRotation);
-            },
-            handleScale: function (event) {
-                if (!rocket.getAttribute('visible')) return;
-                let scaleFactor = event.detail.spreadChange / event.detail.startSpread;
-                let currentScale = this.el.getAttribute('scale');
-                
-                let scaleX = currentScale.x * (1 + scaleFactor);
-                let scaleY = currentScale.y * (1 + scaleFactor);
-                let scaleZ = currentScale.z * (1 + scaleFactor);
-
-                scaleX = Math.min(Math.max(scaleX, this.data.minScale), this.data.maxScale);
-                scaleY = Math.min(Math.max(scaleY, this.data.minScale), this.data.maxScale);
-                scaleZ = Math.min(Math.max(scaleZ, this.data.minScale), this.data.maxScale);
-
-                this.el.setAttribute('scale', {x: scaleX, y: scaleY, z: scaleZ});
-            },
-            handleRotation: function (event) {
-                if (!rocket.getAttribute('visible')) return;
-                let currentRotation = this.el.getAttribute('rotation');
-                
-                // フリック量に応じた回転調整（0.5 = 回転速度）
-                let rotationX = currentRotation.x - event.detail.positionChange.y * 0.5;
-                let rotationY = currentRotation.y + event.detail.positionChange.x * 0.5;
-
-                this.el.setAttribute('rotation', {x: rotationX, y: rotationY, z: currentRotation.z});
-            }
-        });
     </script>
 </body>
 </html>
