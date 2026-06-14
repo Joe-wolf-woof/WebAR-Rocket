@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>和傘・ロケット AR体験（操作確定版）</title>
+    <title>和傘・ロケット AR（完全動作版）</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
-    <script src="https://gftruj.github.io/aframe-gesture-detector-component/dist/aframe-gesture-detector-component.min.js"></script>
 
     <style>
         body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        
         #scanning-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.8); color: white; display: flex;
@@ -19,7 +17,6 @@
             z-index: 999; pointer-events: none; text-align: center;
         }
         .hidden { display: none !important; }
-        
         #instruction-ui {
             position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
             background: rgba(0,0,0,0.6); color: white; padding: 12px 20px;
@@ -32,19 +29,15 @@
 
     <div id="scanning-overlay">
         <p>ARシステム起動中...</p>
-        <p style="font-size: 12px; margin-top: 10px;">カメラの許可ポップアップが出たら「許可」を押してください</p>
+        <p style="font-size: 12px; margin-top: 10px;">画面を2秒間長押しするとロケットが現れます</p>
     </div>
 
     <div id="instruction-ui" class="hidden">
-        画面を2秒長押し：オブジェクトを配置/移動<br>
-        1本指フリック：回転 / 2本指ピンチ：拡大縮小
+        画面を2秒長押し：ロケットを正面に配置<br>
+        1本指スワイプ：回転 / 2本指ピンチ：拡大縮小
     </div>
 
-    <a-scene embedded 
-             arjs="sourceType: webcam; debugUIEnabled: false;"
-             gesture-detector
-             renderer="colorManagement: true; physicallyCorrectLights: true;">
-        
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;" renderer="colorManagement: true;">
         <a-assets>
             <a-asset-item id="rocketModel" src="WebAR-Rocket.glb"></a-asset-item>
         </a-assets>
@@ -54,13 +47,10 @@
         <a-gltf-model id="rocket"
                       src="#rocketModel" 
                       position="0 -0.5 -2" 
-                      scale="0.5 0.5 0.5" 
+                      scale="0.3 0.3 0.3" 
                       rotation="0 0 0"
-                      visible="false"
-                      class="clickable"
-                      gesture-handler="minScale: 0.05; maxScale: 3.0">
+                      visible="false">
         </a-gltf-model>
-
     </a-scene>
 
     <script>
@@ -69,8 +59,14 @@
         const instruction = document.getElementById('instruction-ui');
         
         let touchTimeout = null;
+        
+        // タッチ操作の計算用変数
+        let startX = 0, startY = 0;
+        let startDist = 0;
+        let startScale = 0.3;
+        let isPinched = false;
 
-        // 起動後2秒で案内を表示
+        // 起動処理
         window.addEventListener('load', () => {
             setTimeout(() => {
                 overlay.classList.add('hidden');
@@ -78,23 +74,82 @@
             }, 2000);
         });
 
-        // --- 2秒間長押しでの出現・リセットロジック ---
-        // 画面のどこを触っても、最前面のレイヤーが邪魔していても一発で動くようにHTML全体（window）のイベントで処理します
+        // --- すべてのタッチイベントを標準のJavaScriptで力技制御 ---
+        
         window.addEventListener('touchstart', (e) => {
-            // 2本指操作（ピンチ）のときは長押し判定を行わない
-            if (e.touches.length > 1) return;
+            // 1本指タップのとき：2秒長押しのタイマーを開始
+            if (e.touches.length === 1) {
+                isPinched = false;
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
 
-            touchTimeout = setTimeout(() => {
-                // すでに表示されている場合は、一度初期位置（正面）に引き戻して角度をリセット（再配置機能）
-                rocket.setAttribute('position', '0 -0.5 -2');
-                rocket.setAttribute('rotation', '0 0 0');
-                rocket.setAttribute('visible', 'true');
-            }, 2000); // 2秒
+                touchTimeout = setTimeout(() => {
+                    // 2秒間指が大きく動かなければ出現
+                    rocket.setAttribute('position', '0 -0.5 -2');
+                    rocket.setAttribute('rotation', '0 0 0');
+                    rocket.setAttribute('visible', 'true');
+                }, 2000);
+            } 
+            // 2本指タップのとき：ピンチズームの基準距離を計算
+            else if (e.touches.length === 2) {
+                clearTimeout(touchTimeout); // 長押しはキャンセル
+                isPinched = true;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                startDist = Math.sqrt(dx * dx + dy * dy);
+                startScale = rocket.getAttribute('scale').x;
+            }
         });
 
-        // 指が動いたり離れたら長押しをキャンセル
-        window.addEventListener('touchend', () => { clearTimeout(touchTimeout); });
-        window.addEventListener('touchmove', () => { clearTimeout(touchTimeout); });
+        window.addEventListener('touchmove', (e) => {
+            if (!rocket.getAttribute('visible')) return;
+
+            // 1本指でのスワイプ：フリック回転処理
+            if (e.touches.length === 1 && !isPinched) {
+                const currentX = e.touches[0].clientX;
+                const currentY = e.touches[0].clientY;
+                
+                const deltaX = currentX - startX;
+                const deltaY = currentY - startY;
+
+                // 動いたら長押しタイマーは解除
+                if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+                    clearTimeout(touchTimeout);
+                }
+
+                const currentRotation = rocket.getAttribute('rotation');
+                // 指の移動量に応じて回転（0.3で回転スピードを微調整）
+                rocket.setAttribute('rotation', {
+                    x: currentRotation.x - deltaY * 0.3,
+                    y: currentRotation.y + deltaX * 0.3,
+                    z: currentRotation.z
+                });
+
+                startX = currentX;
+                startY = currentY;
+            } 
+            // 2本指でのピンチ：拡大縮小処理
+            else if (e.touches.length === 2 && isPinched) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (startDist > 0) {
+                    const factor = dist / startDist;
+                    let newScale = startScale * factor;
+                    
+                    // 極端に小さく・大きくならないようにガード（0.05倍〜1.5倍）
+                    newScale = Math.min(Math.max(newScale, 0.05), 1.5);
+                    
+                    rocket.setAttribute('scale', { x: newScale, y: newScale, z: newScale });
+                }
+            }
+        });
+
+        window.addEventListener('touchend', () => {
+            clearTimeout(touchTimeout);
+            startDist = 0;
+        });
     </script>
 </body>
 </html>
